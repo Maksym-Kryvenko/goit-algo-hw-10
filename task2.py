@@ -2,6 +2,8 @@ import scipy.integrate as spi
 import random
 import matplotlib.pyplot as plt
 import numpy as np
+import asyncio
+import datetime as time
 
 
 def create_plot(func, x_min, x_max, inside_points, outside_points):
@@ -35,7 +37,8 @@ def create_plot(func, x_min, x_max, inside_points, outside_points):
     ax.axvline(x=x_max, color='gray', linestyle='--')
     ax.set_title('Integral plot from ' + str(x_min) + ' to ' + str(x_max))
     plt.grid()
-    plt.show()
+    plt.savefig(f'figs/monte_carlo_plot_{time.datetime.now().strftime("%Y%m%d_%H%M%S")}.png', dpi=300)
+    plt.close()
 
 
 def square_func(x, theor=False):
@@ -52,33 +55,43 @@ def is_inside(x, y, func):
     """Checks if the point (x, y) is inside the figure."""
     return y <= func(x)
 
-def monte_carlo_simulation(a, b, num_experiments, func):
+async def single_run(a, b, func):
+    """Performs a single Monte Carlo experiment."""
+    # Random point generation
+    points = [(random.uniform(0, a), random.uniform(0, b)) for _ in range(15000)]
+    # Point selection
+    inside_points = []
+    outside_points = []
+    for point in points:
+        if is_inside(point[0], point[1], func):
+            inside_points.append(point)
+        else:
+            outside_points.append(point)
+
+    # Monte Carlo area calculation
+    M = len(inside_points)
+    N = len(points)
+    area = M/N*(a*b)
+    return area, inside_points, outside_points
+
+
+async def monte_carlo_simulation(a, b, num_experiments, func):
     """Performs a series of experiments using the Monte Carlo method."""
-    average_area = 0
     global_inside_points = []
     global_outside_points = []
-    for _ in range(num_experiments):
-        # Random point generation
-        points = [(random.uniform(0, a), random.uniform(0, b)) for _ in range(15000)]
-        # Point selection
-        inside_points = []
-        outside_points = []
-        for point in points:
-            if is_inside(point[0], point[1], func):
-                inside_points.append(point)
-            else:
-                outside_points.append(point)
-
-        # Monte Carlo area calculation
-        M = len(inside_points)
-        N = len(points)
-        area = M/N*(a*b)
-        average_area += area
-        
+    
+    # Create and run all experiments concurrently
+    tasks = [single_run(a, b, func) for _ in range(num_experiments)]
+    results = await asyncio.gather(*tasks)
+    
+    # Process results - each result is a tuple (area, inside_points, outside_points)
+    areas = []
+    for area, inside_points, outside_points in results:
+        areas.append(area)
         global_inside_points.extend(inside_points)
         global_outside_points.extend(outside_points)
-
-    average_area /= num_experiments
+    
+    average_area = sum(areas) / num_experiments
     return average_area, global_inside_points, global_outside_points
 
 def main(func, x_min, x_max, num_experiments):
@@ -91,7 +104,7 @@ def main(func, x_min, x_max, num_experiments):
     teoretical_square = func(x_max, theor=True)
     y_max = func(x_max)
 
-    average_area, ip, op = monte_carlo_simulation(x_max, y_max, num_experiments, func)
+    average_area, ip, op = asyncio.run(monte_carlo_simulation(x_max, y_max, num_experiments, func))
     print(f"Theoretical square: {teoretical_square}")
     print(f"Monte Carlo average square of the figure after {num_experiments} experiments: {average_area}")
     print(f"Monte Carlo error comparing with SciPy: {(result-average_area)/result:.2%}")
